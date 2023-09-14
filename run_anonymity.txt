@@ -1,0 +1,1 @@
+tamarin-prover -m=proverifequiv A3_Samsung_broadcast_ID.spthy --prove > out.pv ; proverif out.pv

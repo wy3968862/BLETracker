@@ -1,0 +1,43 @@
+theory Samsung_AirTag
+
+begin
+
+functions:
+	gen() : G,
+	update_const() : bitstring,
+	diversify_const : bitstring,
+	
+	first32bytes(bitstring) : bitstring,
+	last32bytes(bitstring) : bitstring,
+	
+	kdf(bitstring) : bitstring,
+	
+	P224(G, exponent) : G,
+	bitstring2exponent(bitstring) : exponent,
+	add(G ,G) : G
+	
+equations:
+	P224(P224(gen, x), y) = P224(P224(gen, y), x)
+	
+	
+	
+diffEquivLemma:
+!(
+	new ~SKS : bitstring;
+	new ~P : G;
+	out(~P);
+	
+	let SKSi = kdf(<~SKS, update_const>) in
+	let uvi = kdf(<SKSi, diversify_const>) in
+	let ui = first32bytes(uvi) in
+	let vi = last32bytes(uvi) in
+	
+	let Pi = add(P224(~P, bitstring2exponent(ui)), P224(gen, bitstring2exponent(vi))) in
+	
+	/* Observational Equivlence: real-or-random secrecy */
+	new ~random : G;
+	out(diff(Pi, ~random))
+	
+)
+
+end
