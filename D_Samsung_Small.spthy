@@ -14,7 +14,7 @@ functions:
 	unbound_const/0,
 	
 	yes_confirm_const/0,
-    	no_confirm_const/0,
+    no_confirm_const/0,
 	
 	serial_number_const/0,
 	/* device bt addresses */
@@ -57,13 +57,13 @@ translation-allow-pattern-lookups
 
 
 /* 1. pairing module */
-let steps(isbound, ~pre_app1 : channel) = 
+let steps(isbound, ~sec_ch : channel) = 
 
 	// event OtherBind(isbound);
 	
 	let sn1 = serial_number_const in
 
-	in(~pre_app1, <hashed_sn_p, rand>);
+	in(~sec_ch, <hashed_sn_p, rand>);
 	
 	let sn = hash_table(hashed_sn_p) in
 	let pri_p = derive_prikey_from_sn(sn) in
@@ -74,26 +74,29 @@ let steps(isbound, ~pre_app1 : channel) =
 	let dhkey_PC = pub_p ^ ~pri_c in
 	let encryption_key = derive_encryption_key(dhkey_PC, rand) in
 	
-	event SendPubkey(~pre_app1, ~pri_c, pub_c); 
-	out(~pre_app1, <encryption_key, pub_c, 'SendPubKey'>);
+	event SendPubkey(~sec_ch, ~pri_c, pub_c); 
+	out(~sec_ch, <encryption_key, pub_c, 'SendPubKey'>);
 	
 
 	
-	in(~pre_app1, sn_p_1);
+	in(~sec_ch, sn_p_1);
 	if ((sn1 = sn_p_1) & (isbound = bound_const)) then (
 		event Bounded();
 		
-		out(~pre_app1, bound_const);
+		out(~sec_ch, bound_const);
 		
 		/* id sharing */
 		
-		in(~pre_app1, <sn_p, encryption_key_c>);
+		in(~sec_ch, <sn_p, encryption_key_c>);
 		if ((sn = sn_p) & (encryption_key = encryption_key_c)) then (
 		new ~privacy_iv;
 		new ~privacy_seed;
 		let privacy_poolsize = poolsize_const in
 		new ~time_sync;
-		out(~pre_app1, <~privacy_iv, ~privacy_seed, privacy_poolsize, ~time_sync>);
+		
+		event SendSecureParam(~privacy_iv, ~privacy_seed, privacy_poolsize, ~time_sync);
+		
+		out(~sec_ch, <~privacy_iv, ~privacy_seed, privacy_poolsize, ~time_sync>)
 		
 		//let privacy_key = derive_key(encryption_key, privacy_const) in
 		//let id = get_id(privacy_key, ~privacy_iv, ~privacy_seed, privacy_poolsize) in
@@ -103,17 +106,17 @@ let steps(isbound, ~pre_app1 : channel) =
 	)
 	else (
 		event NotBounded();
-		out(~pre_app1, unbound_const);
+		out(~sec_ch, unbound_const);
 		
 		/* id sharing */
 		
-		in(~pre_app1, <sn_p, encryption_key_c>);
+		in(~sec_ch, <sn_p, encryption_key_c>);
 		if ((sn = sn_p) & (encryption_key = encryption_key_c)) then (
 		new ~privacy_iv;
 		new ~privacy_seed;
 		let privacy_poolsize = poolsize_const in
 		new ~time_sync;
-		out(~pre_app1, <~privacy_iv, ~privacy_seed, privacy_poolsize, ~time_sync>);
+		out(~sec_ch, <~privacy_iv, ~privacy_seed, privacy_poolsize, ~time_sync>)
 		
 		//let privacy_key = derive_key(encryption_key, privacy_const) in
 		//let id = get_id(privacy_key, ~privacy_iv, ~privacy_seed, privacy_poolsize) in
@@ -125,46 +128,49 @@ let steps(isbound, ~pre_app1 : channel) =
 
 	
 
-let stepc(~s, ~open_ch : channel, ~pre_app1 : channel, ~cudo : channel, ~central_user_ui : channel) = 
+let stepc(~s, ~sec_ch : channel) = 
 	/* PK exchange */
-	in(~open_ch, hashed_sn_p);
+	in(hashed_sn_p);
 	new ~rand;
 	
 	
-	out(~pre_app1, <hashed_sn_p, ~rand>);
-	in(~pre_app1, <encryption_key, pub_c, 'SendPubKey'>);
+	out(~sec_ch, <hashed_sn_p, ~rand>);
+	in(~sec_ch, <encryption_key, pub_c, 'SendPubKey'>);
 	
-	event OutPubKey(~pre_app1, ~open_ch, pub_c);
-	out(~open_ch, <~rand, pub_c>);
+	event OutPubKey(~sec_ch, pub_c);
+	out(<~rand, pub_c>);
 
 	/* authentication */
 	let auth_key = derive_key(encryption_key, bleAuthentication_const) in
 	new ~n1;
-	out(~open_ch, ~n1);
+	out(~n1);
 	
-	in(~open_ch, n2);
+	in(n2);
 	let encrypted_nonce1 = AES_enc(smartthings_const, auth_key, n2) in
-	out(~open_ch, encrypted_nonce1);
+	out(encrypted_nonce1);
 	
-	in(~open_ch, encrypted_nonce2);
+	in(encrypted_nonce2);
 	let dec_mes_2 = AES_dec(encrypted_nonce2, auth_key, ~n1) in
 	
 	
 	if smartthings_const = dec_mes_2 then (
 		let link_key = derive_key(encryption_key, n2) in
-		in(~open_ch, encrypted_sn_p1);
+		in(encrypted_sn_p1);
 		let sn_p1 = AES_dec(encrypted_sn_p1, link_key, n2) in
-		out(~pre_app1, sn_p1);
+		out(~sec_ch, sn_p1);
 		
-		in(~pre_app1, isbound);
+		in(~sec_ch, isbound);
 		
 		if (isbound = unbound_const) then (
 			/* id sharing */
-			in(~open_ch, encrypted_sn_p);
+			in(encrypted_sn_p);
 			let sn_p = AES_dec(encrypted_sn_p, link_key, n2) in
-			out(~pre_app1, <sn_p, encryption_key>);
-			in(~pre_app1, <privacy_iv, privacy_seed, privacy_poolsize, time_sync>);
+			out(~sec_ch, <sn_p, encryption_key>);
+			in(~sec_ch, <privacy_iv, privacy_seed, privacy_poolsize, time_sync>);
 
+			
+			event ReceiveSecureParam(privacy_iv, privacy_seed, privacy_poolsize, time_sync);
+			
 			let encrypted_param = AES_enc(<privacy_iv, privacy_seed, privacy_poolsize, time_sync>, link_key, n2) in
 			
 			/*
@@ -174,54 +180,54 @@ let stepc(~s, ~open_ch : channel, ~pre_app1 : channel, ~cudo : channel, ~central
 			let encrypted_time = AES_enc(time_sync, link_key, n2) in
 			*/
 			
-			out(~open_ch, encrypted_param);
+			out(encrypted_param);
 			let privacy_key = derive_key(encryption_key, privacy_const) in
 			let id = get_id(privacy_key, privacy_iv, privacy_seed, privacy_poolsize) in
 			
-			out(~cudo, id);
+			out(~sec_ch, id);
 			
-			in(~central_user_ui, confirm);
+			in(~sec_ch, confirm);
 			new ~tmp;
 			if confirm = yes_confirm_const then
-				out(~open_ch, <~tmp, AES_enc(~s, id, ~tmp)>)
+				out(<~tmp, AES_enc(~s, id, ~tmp)>)
 		)
 	)
 
 
-let stepp(~p1p, ~s, ~open_ch : channel,  ~peripheral_user_data_out : channel, ~peripheral_user_ui : channel) = 
+let stepp(~s, ~sec_ch : channel) = 
 	let sn = serial_number_const in
 	let hashed_sn = derive_hashed_sn(sn) in
 	let pri_p = derive_prikey_from_sn(sn) in
 	let pub_p = gen ^ pri_p in
 
-	out(~open_ch, hashed_sn);
-	in(~open_ch, <rand, pub_c>);
+	out(hashed_sn);
+	in(<rand, pub_c>);
 	let dhkey_CP = pub_c ^ pri_p in
 	let encryption_key = derive_encryption_key(dhkey_CP, rand) in
 	 
 	/* authentication stage 1 */
 	let auth_key = derive_key(encryption_key, bleAuthentication_const) in
 	new ~n2;
-	out(~open_ch, ~n2);
+	out(~n2);
 	
-	in(~open_ch, n1);
+	in(n1);
 	let encrypted_nonce2 = AES_enc(smartthings_const, auth_key, n1) in
-	out(~open_ch, encrypted_nonce2);
+	out(encrypted_nonce2);
 	
-	in(~open_ch, encrypted_nonce1);
+	in(encrypted_nonce1);
 	let dec_mes_1 = AES_dec(encrypted_nonce1, auth_key, ~n2) in
 	
 	if smartthings_const = dec_mes_1 then (
 		let link_key = derive_key(encryption_key, ~n2) in
 
 		/* id sharing */
-		out(~open_ch, AES_enc(sn, link_key, ~n2));
+		out(AES_enc(sn, link_key, ~n2));
 		
-		in(~open_ch, encrypted_param);
+		in(encrypted_param);
 		let <privacy_iv, privacy_seed, privacy_poolsize, time_sync> = AES_dec(encrypted_param, link_key, ~n2) in
 		
 		/*
-		in(~open_ch, <encrypted_iv, encrypted_seed, encrypted_poolsize, encrypted_time>);
+		in(, <encrypted_iv, encrypted_seed, encrypted_poolsize, encrypted_time>);
 		let privacy_iv = AES_dec(encrypted_iv, link_key, ~n2) in
 		let privacy_seed = AES_dec(encrypted_seed, link_key, ~n2) in
 		let privacy_poolsize = AES_dec(encrypted_poolsize, link_key, ~n2) in
@@ -232,11 +238,11 @@ let stepp(~p1p, ~s, ~open_ch : channel,  ~peripheral_user_data_out : channel, ~p
 		let privacy_key = derive_key(encryption_key, privacy_const) in
 		let id = get_id(privacy_key, privacy_iv, privacy_seed, privacy_poolsize) in
 	
-		out(~peripheral_user_data_out, id);
+		out(~sec_ch, id);
 	
-		in(~peripheral_user_ui, confirm);
+		in(~sec_ch, confirm);
 		if confirm = yes_confirm_const then (
-			in(~open_ch, <tmp, enc_s>);
+			in(<tmp, enc_s>);
 			let s1 = AES_dec(enc_s, id, tmp) in
 			if ~s = s1 then
 				event PairSuccess(id, confirm)
@@ -244,17 +250,17 @@ let stepp(~p1p, ~s, ~open_ch : channel,  ~peripheral_user_data_out : channel, ~p
 	)
 
 
-let user(~cudo : channel, ~peripheral_user_data_out : channel, ~central_user_ui : channel) = 
-	in(~cudo, id_c);
-	in(~peripheral_user_data_out, id_p);
+let user(~sec_ch : channel) = 
+	in(~sec_ch, id_c);
+	in(~sec_ch, id_p);
 	if id_c = id_p then (
-	  	out(~central_user_ui, yes_confirm_const);
-	  	out(~peripheral_user_ui, yes_confirm_const);
+	  	out(~sec_ch, yes_confirm_const);
+	  	out(~sec_ch, yes_confirm_const);
 	  	event UserConfirm(yes_confirm_const)
 	)
 	else (
-		out(~central_user_ui, no_confirm_const);
-  		out(~peripheral_user_ui, no_confirm_const);
+		out(~sec_ch, no_confirm_const);
+  		out(~sec_ch, no_confirm_const);
   		event UserConfirm(no_confirm_const)
 	)
 
@@ -262,47 +268,42 @@ let user(~cudo : channel, ~peripheral_user_data_out : channel, ~central_user_ui 
 
 
 process:
-	/* open channel for data communication between central device and peripheral device */
-	new ~open_ch: channel;
-	out(~open_ch);
 	
-	/* secure channel for data communication between cloud and pre-installed app in phone */
-	new ~pre_app1: channel;
-
-	/* secure channel for data communication while producing peripheral device */
-	new ~secure_ch: channel;
-
-	/* secure channels for user interaction with central and peripheral */
-	new ~cudo: channel;
-	new ~central_user_ui: channel;
-	new ~peripheral_user_data_out: channel;
-	new ~peripheral_user_ui: channel;
+	new ~sec_ch : channel;
+	event SecureChannel(~sec_ch);
 	
-	new ~userA;
 	new ~s;
 	
-	
 	(	
-		!steps(bound_const, ~pre_app1) |
-		!stepc(~s, ~open_ch, ~pre_app1, ~cudo, ~central_user_ui) |
-		!stepp(~s, ~open_ch, ~peripheral_user_data_out, ~peripheral_user_ui) |
-		!user(~cudo, ~peripheral_user_data_out, ~central_user_ui)
+		!steps(bound_const, ~sec_ch) |
+		!stepc(~s, ~sec_ch) |
+		!stepp(~s, ~sec_ch) |
+		!user(~sec_ch)
 	)
 	
-lemma pubkey_sources[sources, reuse, use_induction]:
+	
+restriction secure_channel:
+	" All ch #i #k. ( SecureChannel(ch) @ i & KU(ch) @k ) ==> F" 
+	
+	
+lemma pubkey_sources[sources, output=[spthy]]:
 "
-	All c1 c2 pkey #i. OutPubKey(c1, c2, pkey) @ i ==> (
-		(Ex prikey #t. SendPubkey(c2, prikey, pkey) @ t & t < i)
+	All c1 pkey #i. OutPubKey(c1, pkey) @ i ==> (
+		(Ex prikey #t. SendPubkey(c1, prikey, pkey) @ t & t < i)
 		
 	)
 "
 
-lemma secure_ch_pubkey[reuse]: 
+
+lemma secure_param_sources[sources, output=[spthy]]:
 "
-	All pkey #t. KU(pkey) @t ==> ( Ex c1 c2 #i. OutPubKey(c1, c2, pkey) @i & i < t )
+	All p1 p2 p3 p4 #i. ReceiveSecureParam(p1, p2 ,p3, p4) @ i ==> (
+		Ex #t. SendSecureParam(p1, p2, p3, p4) @ t & t < i
+	)
 "
+
 	
-lemma confirm_sources[sources] :
+lemma confirm_sources[sources,  output=[spthy]] :
 "
 	All cfm id #i. PairSuccess(cfm, id) @ i ==> (Ex #t. UserConfirm(cfm) @ t & t < i)
 "
